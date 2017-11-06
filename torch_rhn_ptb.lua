@@ -54,11 +54,11 @@ local params = {batch_size=20,
 
 local disable_dropout = false
 local function local_Dropout(input, noise)
-  return nn.CMulTable()({input, noise})
+    return nn.CMulTable()({input, noise})
 end
 
 local function transfer_data(x)
-  return x:cuda()
+    return x:cuda()
 end
 
 local state_train, state_valid, state_test
@@ -67,90 +67,90 @@ local paramx, paramdx
 
 
 local function rhn(x, prev_c, prev_h, noise_i, noise_h)
-  -- Reshape to (batch_size, n_gates, hid_size)
-  -- Then slice the n_gates dimension, i.e dimension 2
-  local reshaped_noise_i = nn.Reshape(2,params.rnn_size)(noise_i)   -- this might mean rhn has 2 gates, and this is the noise mask for input
-  local reshaped_noise_h = nn.Reshape(2,params.rnn_size)(noise_h)   -- this should be the noise for prior hidden state
-  local sliced_noise_i   = nn.SplitTable(2)(reshaped_noise_i)   -- SplitTable(2) means split the input tensor along the 2nd dim, which is the num of gates dim
-  local sliced_noise_h   = nn.SplitTable(2)(reshaped_noise_h)   -- after SplitTable, the output is a table of tensors
-  -- Calculate all two gates
-  local dropped_h_tab = {}
-  local h2h_tab = {}
-  local t_gate_tab = {}
-  local c_gate_tab = {}
-  local in_transform_tab = {}
-  local s_tab = {}
-  for layer_i = 1, params.recurrence_depth do
-    local i2h        = {}
-    h2h_tab[layer_i] = {}
-    if layer_i == 1 then
-      for i = 1, 2 do
-        -- Use select table to fetch each gate
-        local dropped_x         = local_Dropout(x, nn.SelectTable(i)(sliced_noise_i)) -- slidced_noise_i is a table of tensors. So there are 2 gates and corresponding noise mask
-        dropped_h_tab[layer_i]  = local_Dropout(prev_h, nn.SelectTable(i)(sliced_noise_h))  -- the 2 gates contain one gate for calc hidden state, and the other gate being the transform gate
-        i2h[i]                  = nn.Linear(params.rnn_size, params.rnn_size)(dropped_x)
-        h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i])
-      end
-      t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(nn.CAddTable()({i2h[1], h2h_tab[layer_i][1]}))) -- this is the tranform module in equation 8 in the paper. I guess the AddConstant is an init step
-      in_transform_tab[layer_i] = nn.Tanh()(nn.CAddTable()({i2h[2], h2h_tab[layer_i][2]}))  -- calculate the hidden module, depicted in equation 7 in the paper
-      c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i])) -- in the implementation, the c gate is designed as (1-t), in which the t gate is calculated aboved
-      s_tab[layer_i]           = nn.CAddTable()({
-        nn.CMulTable()({c_gate_tab[layer_i], prev_h}),
-        nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
-      })  -- calc the output at time step t, as depicted in equation 6 in the paper
-    else
-      for i = 1, 2 do
-        -- Use select table to fetch each gate
-        dropped_h_tab[layer_i]  = local_Dropout(s_tab[layer_i-1], nn.SelectTable(i)(sliced_noise_h))
-        h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i]) -- h2h_tab[layer_i][1] is the multiplication in equation 8, h2h_tab[layer_i][2] is multiplication in equation 7
-      end
-      t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(h2h_tab[layer_i][1]))
-      in_transform_tab[layer_i] = nn.Tanh()(h2h_tab[layer_i][2])
-      c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i]))
-      s_tab[layer_i]           = nn.CAddTable()({
-        nn.CMulTable()({c_gate_tab[layer_i], s_tab[layer_i-1]}),
-        nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
-      })
+    -- Reshape to (batch_size, n_gates, hid_size)
+    -- Then slice the n_gates dimension, i.e dimension 2
+    local reshaped_noise_i = nn.Reshape(2,params.rnn_size)(noise_i)   -- this might mean rhn has 2 gates, and this is the noise mask for input
+    local reshaped_noise_h = nn.Reshape(2,params.rnn_size)(noise_h)   -- this should be the noise for prior hidden state
+    local sliced_noise_i   = nn.SplitTable(2)(reshaped_noise_i)   -- SplitTable(2) means split the input tensor along the 2nd dim, which is the num of gates dim
+    local sliced_noise_h   = nn.SplitTable(2)(reshaped_noise_h)   -- after SplitTable, the output is a table of tensors
+    -- Calculate all two gates
+    local dropped_h_tab = {}
+    local h2h_tab = {}
+    local t_gate_tab = {}
+    local c_gate_tab = {}
+    local in_transform_tab = {}
+    local s_tab = {}
+    for layer_i = 1, params.recurrence_depth do
+        local i2h        = {}
+        h2h_tab[layer_i] = {}
+        if layer_i == 1 then
+            for i = 1, 2 do
+                -- Use select table to fetch each gate
+                local dropped_x         = local_Dropout(x, nn.SelectTable(i)(sliced_noise_i)) -- slidced_noise_i is a table of tensors. So there are 2 gates and corresponding noise mask
+                dropped_h_tab[layer_i]  = local_Dropout(prev_h, nn.SelectTable(i)(sliced_noise_h))  -- the 2 gates contain one gate for calc hidden state, and the other gate being the transform gate
+                i2h[i]                  = nn.Linear(params.rnn_size, params.rnn_size)(dropped_x)
+                h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i])
+            end
+            t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(nn.CAddTable()({i2h[1], h2h_tab[layer_i][1]}))) -- this is the tranform module in equation 8 in the paper. I guess the AddConstant is an init step
+            in_transform_tab[layer_i] = nn.Tanh()(nn.CAddTable()({i2h[2], h2h_tab[layer_i][2]}))  -- calculate the hidden module, depicted in equation 7 in the paper
+            c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i])) -- in the implementation, the c gate is designed as (1-t), in which the t gate is calculated aboved
+            s_tab[layer_i]           = nn.CAddTable()({
+                nn.CMulTable()({c_gate_tab[layer_i], prev_h}),
+                nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
+            })  -- calc the output at time step t, as depicted in equation 6 in the paper
+        else
+            for i = 1, 2 do
+                -- Use select table to fetch each gate
+                dropped_h_tab[layer_i]  = local_Dropout(s_tab[layer_i-1], nn.SelectTable(i)(sliced_noise_h))
+                h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i]) -- h2h_tab[layer_i][1] is the multiplication in equation 8, h2h_tab[layer_i][2] is multiplication in equation 7
+            end
+            t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(h2h_tab[layer_i][1]))
+            in_transform_tab[layer_i] = nn.Tanh()(h2h_tab[layer_i][2])
+            c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i]))
+            s_tab[layer_i]           = nn.CAddTable()({
+                nn.CMulTable()({c_gate_tab[layer_i], s_tab[layer_i-1]}),
+                nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
+            })
+        end
     end
-  end
-  local next_h = s_tab[params.recurrence_depth]
-  local next_c = prev_c
-  return next_c, next_h
+    local next_h = s_tab[params.recurrence_depth]
+    local next_c = prev_c
+    return next_c, next_h
 end
 
 local function create_network()
-  local x                = nn.Identity()()
-  local y                = nn.Identity()()
-  local prev_s           = nn.Identity()()
-  local noise_x          = nn.Identity()()
-  local noise_i          = nn.Identity()()
-  local noise_h          = nn.Identity()()
-  local noise_o          = nn.Identity()()
-  local i                = {[0] = LookupTable(params.vocab_size,
-                                              params.rnn_size)(x)}
-  i[0] = local_Dropout(i[0], noise_x)
-  local next_s           = {}
-  local split            = {prev_s:split(2 * params.layers)}
-  local noise_i_split    = {noise_i:split(params.layers)}
-  local noise_h_split    = {noise_h:split(params.layers)}
-  for layer_idx = 1, params.layers do
-    local prev_c         = split[2 * layer_idx - 1]
-    local prev_h         = split[2 * layer_idx]
-    local n_i            = noise_i_split[layer_idx]
-    local n_h            = noise_h_split[layer_idx]
-    local next_c, next_h = rhn(i[layer_idx - 1], prev_c, prev_h, n_i, n_h)
-    table.insert(next_s, next_c)
-    table.insert(next_s, next_h)
-    i[layer_idx] = next_h
-  end
-  local h2y              = nn.Linear(params.rnn_size, params.vocab_size)
-  local dropped          = local_Dropout(i[params.layers], noise_o)
-  local pred             = nn.LogSoftMax()(h2y(dropped))
-  local err              = nn.ClassNLLCriterion()({pred, y})
-  local module           = nn.gModule({x, y, prev_s, noise_x, noise_i, noise_h, noise_o},
-                                      {err, nn.Identity()(next_s)})
-  module:getParameters():uniform(-params.init_weight, params.init_weight)
-  return transfer_data(module)
+    local x                = nn.Identity()()
+    local y                = nn.Identity()()
+    local prev_s           = nn.Identity()()
+    local noise_x          = nn.Identity()()
+    local noise_i          = nn.Identity()()
+    local noise_h          = nn.Identity()()
+    local noise_o          = nn.Identity()()
+    local i                = {[0] = LookupTable(params.vocab_size,
+                                                params.rnn_size)(x)}
+    i[0] = local_Dropout(i[0], noise_x)
+    local next_s           = {}
+    local split            = {prev_s:split(2 * params.layers)}
+    local noise_i_split    = {noise_i:split(params.layers)}
+    local noise_h_split    = {noise_h:split(params.layers)}
+    for layer_idx = 1, params.layers do
+      local prev_c         = split[2 * layer_idx - 1]
+      local prev_h         = split[2 * layer_idx]
+      local n_i            = noise_i_split[layer_idx]
+      local n_h            = noise_h_split[layer_idx]
+      local next_c, next_h = rhn(i[layer_idx - 1], prev_c, prev_h, n_i, n_h)
+      table.insert(next_s, next_c)
+      table.insert(next_s, next_h)
+      i[layer_idx] = next_h
+    end
+    local h2y              = nn.Linear(params.rnn_size, params.vocab_size)
+    local dropped          = local_Dropout(i[params.layers], noise_o)
+    local pred             = nn.LogSoftMax()(h2y(dropped))
+    local err              = nn.ClassNLLCriterion()({pred, y})
+    local module           = nn.gModule({x, y, prev_s, noise_x, noise_i, noise_h, noise_o},
+                                        {err, nn.Identity()(next_s)})
+    module:getParameters():uniform(-params.init_weight, params.init_weight)
+    return transfer_data(module)
 end
 
 local function setup()
