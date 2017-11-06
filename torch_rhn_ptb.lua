@@ -69,10 +69,10 @@ local paramx, paramdx
 local function rhn(x, prev_c, prev_h, noise_i, noise_h)
   -- Reshape to (batch_size, n_gates, hid_size)
   -- Then slice the n_gates dimension, i.e dimension 2
-  local reshaped_noise_i = nn.Reshape(2,params.rnn_size)(noise_i)
-  local reshaped_noise_h = nn.Reshape(2,params.rnn_size)(noise_h)
-  local sliced_noise_i   = nn.SplitTable(2)(reshaped_noise_i)
-  local sliced_noise_h   = nn.SplitTable(2)(reshaped_noise_h)
+  local reshaped_noise_i = nn.Reshape(2,params.rnn_size)(noise_i)   -- this might mean rhn has 2 gates, and this is the noise mask for input
+  local reshaped_noise_h = nn.Reshape(2,params.rnn_size)(noise_h)   -- this should be the noise for prior hidden state
+  local sliced_noise_i   = nn.SplitTable(2)(reshaped_noise_i)   -- SplitTable(2) means split the input tensor along the 2nd dim, which is the num of gates dim
+  local sliced_noise_h   = nn.SplitTable(2)(reshaped_noise_h)   -- after SplitTable, the output is a table of tensors
   -- Calculate all two gates
   local dropped_h_tab = {}
   local h2h_tab = {}
@@ -86,23 +86,23 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
     if layer_i == 1 then
       for i = 1, 2 do
         -- Use select table to fetch each gate
-        local dropped_x         = local_Dropout(x, nn.SelectTable(i)(sliced_noise_i))
-        dropped_h_tab[layer_i]  = local_Dropout(prev_h, nn.SelectTable(i)(sliced_noise_h))
+        local dropped_x         = local_Dropout(x, nn.SelectTable(i)(sliced_noise_i)) -- slidced_noise_i is a table of tensors. So there are 2 gates and corresponding noise mask
+        dropped_h_tab[layer_i]  = local_Dropout(prev_h, nn.SelectTable(i)(sliced_noise_h))  -- the 2 gates contain one gate for calc hidden state, and the other gate being the transform gate
         i2h[i]                  = nn.Linear(params.rnn_size, params.rnn_size)(dropped_x)
         h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i])
       end
-      t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(nn.CAddTable()({i2h[1], h2h_tab[layer_i][1]})))
-      in_transform_tab[layer_i] = nn.Tanh()(nn.CAddTable()({i2h[2], h2h_tab[layer_i][2]}))
-      c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i]))
+      t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(nn.CAddTable()({i2h[1], h2h_tab[layer_i][1]}))) -- this is the tranform module in equation 8 in the paper. I guess the AddConstant is an init step
+      in_transform_tab[layer_i] = nn.Tanh()(nn.CAddTable()({i2h[2], h2h_tab[layer_i][2]}))  -- calculate the hidden module, depicted in equation 7 in the paper
+      c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i])) -- in the implementation, the c gate is designed as (1-t), in which the t gate is calculated aboved
       s_tab[layer_i]           = nn.CAddTable()({
         nn.CMulTable()({c_gate_tab[layer_i], prev_h}),
         nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
-      })
+      })  -- calc the output at time step t, as depicted in equation 6 in the paper
     else
       for i = 1, 2 do
         -- Use select table to fetch each gate
         dropped_h_tab[layer_i]  = local_Dropout(s_tab[layer_i-1], nn.SelectTable(i)(sliced_noise_h))
-        h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i])
+        h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i]) -- h2h_tab[layer_i][1] is the multiplication in equation 8, h2h_tab[layer_i][2] is multiplication in equation 7
       end
       t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(h2h_tab[layer_i][1]))
       in_transform_tab[layer_i] = nn.Tanh()(h2h_tab[layer_i][2])
