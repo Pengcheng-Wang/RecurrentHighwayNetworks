@@ -114,7 +114,7 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
         end
     end
     local next_h = s_tab[params.recurrence_depth]
-    local next_c = prev_c
+    local next_c = prev_c   -- this is a little weird. prev_c seems not used at all. It's also weird why the author liked to keep the record of the c gate
     return next_c, next_h
 end
 
@@ -127,21 +127,21 @@ local function create_network()
     local noise_h          = nn.Identity()()
     local noise_o          = nn.Identity()()
     local i                = {[0] = LookupTable(params.vocab_size,
-                                                params.rnn_size)(x)}
+                                                params.rnn_size)(x)}    -- this lookup table is specifically designed for language model
     i[0] = local_Dropout(i[0], noise_x)
     local next_s           = {}
-    local split            = {prev_s:split(2 * params.layers)}
-    local noise_i_split    = {noise_i:split(params.layers)}
+    local split            = {prev_s:split(2 * params.layers)}  -- the split function: https://github.com/torch/torch7/blob/master/doc/tensor.md#result-splitresult-tensor-size-dim
+    local noise_i_split    = {noise_i:split(params.layers)} -- here the split() does split the tensor into tensors with size of params.layers along the 1st dim (in default)
     local noise_h_split    = {noise_h:split(params.layers)}
     for layer_idx = 1, params.layers do
-      local prev_c         = split[2 * layer_idx - 1]
-      local prev_h         = split[2 * layer_idx]
-      local n_i            = noise_i_split[layer_idx]
-      local n_h            = noise_h_split[layer_idx]
-      local next_c, next_h = rhn(i[layer_idx - 1], prev_c, prev_h, n_i, n_h)
-      table.insert(next_s, next_c)
-      table.insert(next_s, next_h)
-      i[layer_idx] = next_h
+        local prev_c         = split[2 * layer_idx - 1]
+        local prev_h         = split[2 * layer_idx]
+        local n_i            = noise_i_split[layer_idx]     -- n_i and n_h are the dropout mask
+        local n_h            = noise_h_split[layer_idx]
+        local next_c, next_h = rhn(i[layer_idx - 1], prev_c, prev_h, n_i, n_h)
+        table.insert(next_s, next_c)
+        table.insert(next_s, next_h)
+        i[layer_idx] = next_h
     end
     local h2y              = nn.Linear(params.rnn_size, params.vocab_size)
     local dropped          = local_Dropout(i[params.layers], noise_o)
@@ -154,18 +154,18 @@ local function create_network()
 end
 
 local function setup()
-  print("Creating an RHN network.")
-  local core_network = create_network()
-  paramx, paramdx = core_network:getParameters()
-  model.s = {}
-  model.ds = {}
-  model.start_s = {}
-  for j = 0, params.seq_length do
-    model.s[j] = {}
-    for d = 1, 2 * params.layers do
-      model.s[j][d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
+    print("Creating an RHN network.")
+    local core_network = create_network()
+    paramx, paramdx = core_network:getParameters()
+    model.s = {}
+    model.ds = {}
+    model.start_s = {}
+    for j = 0, params.seq_length do -- todo:pwang8. Time to read this
+        model.s[j] = {}
+        for d = 1, 2 * params.layers do
+            model.s[j][d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
+        end
     end
-  end
   for d = 1, 2 * params.layers do
     model.start_s[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
     model.ds[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
