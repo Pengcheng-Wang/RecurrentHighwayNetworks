@@ -158,7 +158,7 @@ local function setup()
     local core_network = create_network()
     paramx, paramdx = core_network:getParameters()
     model.s = {}
-    model.ds = {}
+    model.ds = {}   -- I guess this is derivatives over hidden states (s)
     model.start_s = {}
     for j = 0, params.seq_length do
         model.s[j] = {}
@@ -221,7 +221,7 @@ local function sample_noise(state)
         model.noise_x[i]:bernoulli(1 - params.dropout_x)
         model.noise_x[i]:div(1 - params.dropout_x)
     end
-    -- todo:pwang8. Time to read this.
+
     for b = 1, params.batch_size do
         for i = 1, params.seq_length do
             local x = state.data[state.pos + i - 1]
@@ -234,155 +234,155 @@ local function sample_noise(state)
             end
         end
     end
-  for d = 1, params.layers do
-    model.noise_i[d]:bernoulli(1 - params.dropout_i)
-    model.noise_i[d]:div(1 - params.dropout_i)
-    model.noise_h[d]:bernoulli(1 - params.dropout_h)
-    model.noise_h[d]:div(1 - params.dropout_h)
-  end
-  model.noise_o:bernoulli(1 - params.dropout_o)
-  model.noise_o:div(1 - params.dropout_o)
+    for d = 1, params.layers do
+        model.noise_i[d]:bernoulli(1 - params.dropout_i)
+        model.noise_i[d]:div(1 - params.dropout_i)
+        model.noise_h[d]:bernoulli(1 - params.dropout_h)
+        model.noise_h[d]:div(1 - params.dropout_h)
+    end
+    model.noise_o:bernoulli(1 - params.dropout_o)
+    model.noise_o:div(1 - params.dropout_o)
 end
 
 local function reset_noise()
-  for j = 1, params.seq_length do
-    model.noise_x[j]:zero():add(1)
-  end
-  for d = 1, params.layers do
-    model.noise_i[d]:zero():add(1)
-    model.noise_h[d]:zero():add(1)
-  end
-  model.noise_o:zero():add(1)
+    for j = 1, params.seq_length do
+        model.noise_x[j]:zero():add(1)
+    end
+    for d = 1, params.layers do
+        model.noise_i[d]:zero():add(1)
+        model.noise_h[d]:zero():add(1)
+    end
+    model.noise_o:zero():add(1)
 end
 
 local function fp(state)
-  g_replace_table(model.s[0], model.start_s)
-  if state.pos + params.seq_length > state.data:size(1) then
-    reset_state(state)
-  end
+    g_replace_table(model.s[0], model.start_s)
+    if state.pos + params.seq_length > state.data:size(1) then
+        reset_state(state)
+    end
 
-  if disable_dropout then reset_noise() else sample_noise(state) end
-  for i = 1, params.seq_length do
-    local x = state.data[state.pos]
-    local y = state.data[state.pos + 1]
-    local s = model.s[i - 1]
-    model.err[i], model.s[i] = unpack(model.rnns[i]:forward(
-      {x, y, s, model.noise_xe[i], model.noise_i, model.noise_h, model.noise_o}))
-    state.pos = state.pos + 1
-  end
-  g_replace_table(model.start_s, model.s[params.seq_length])
-  return model.err
+    if disable_dropout then reset_noise() else sample_noise(state) end
+    for i = 1, params.seq_length do
+        local x = state.data[state.pos]
+        local y = state.data[state.pos + 1]
+        local s = model.s[i - 1]
+        model.err[i], model.s[i] = unpack(model.rnns[i]:forward(
+          {x, y, s, model.noise_xe[i], model.noise_i, model.noise_h, model.noise_o}))
+        state.pos = state.pos + 1
+    end
+    g_replace_table(model.start_s, model.s[params.seq_length])
+    return model.err
 end
 
 local function bp(state)
-  paramdx:zero()
-  reset_ds()
-  for i = params.seq_length, 1, -1 do
-    state.pos = state.pos - 1
-    local x = state.data[state.pos]
-    local y = state.data[state.pos + 1]
-    local s = model.s[i - 1]
-    local derr = transfer_data(torch.ones(1))
-    local tmp = model.rnns[i]:backward( -- Yarin: do we need model.noise_x[i+1]?
-      {x, y, s, model.noise_xe[i], model.noise_i, model.noise_h, model.noise_o},
-      {derr, model.ds})[3]
-    g_replace_table(model.ds, tmp)
-    cutorch.synchronize()
-  end
-  state.pos = state.pos + params.seq_length
-  model.norm_dw = paramdx:norm()
-  if model.norm_dw > params.max_grad_norm then
-    local shrink_factor = params.max_grad_norm / model.norm_dw
-    paramdx:mul(shrink_factor)
-  end
-  paramx:add(paramdx:mul(-params.lr))
-  paramx:add(-params.weight_decay, paramx)
+    paramdx:zero()
+    reset_ds()
+    for i = params.seq_length, 1, -1 do
+        state.pos = state.pos - 1
+        local x = state.data[state.pos]
+        local y = state.data[state.pos + 1]
+        local s = model.s[i - 1]
+        local derr = transfer_data(torch.ones(1))
+        local tmp = model.rnns[i]:backward( -- Yarin: do we need model.noise_x[i+1]?
+          {x, y, s, model.noise_xe[i], model.noise_i, model.noise_h, model.noise_o},
+          {derr, model.ds})[3]
+        g_replace_table(model.ds, tmp)
+        cutorch.synchronize()
+    end
+    state.pos = state.pos + params.seq_length
+    model.norm_dw = paramdx:norm()
+    if model.norm_dw > params.max_grad_norm then
+        local shrink_factor = params.max_grad_norm / model.norm_dw
+        paramdx:mul(shrink_factor)
+    end
+    paramx:add(paramdx:mul(-params.lr))   -- They only use SGD and param weigth decay, interesting
+    paramx:add(-params.weight_decay, paramx)    -- the weight decay is interesting. This is different from L2 norm. Some intro can be found here https://metacademy.org/graphs/concepts/weight_decay_neural_networks
 end
 
 local function run_valid()
-  reset_state(state_valid)
-  disable_dropout = true
-  local len = (state_valid.data:size(1) - 1) / (params.seq_length)
-  local perp = 0
-  for i = 1, len do
-    local p = fp(state_valid)
-    perp = perp + p:mean()
-  end
-  print("Validation set perplexity : " .. g_f3(torch.exp(perp / len)))
-  disable_dropout = false
+    reset_state(state_valid)
+    disable_dropout = true  -- Attention: in validation, dropout is diabled, which means all inputs go through. This is the so-called variational dropout
+    local len = (state_valid.data:size(1) - 1) / (params.seq_length)
+    local perp = 0
+    for i = 1, len do
+        local p = fp(state_valid)
+        perp = perp + p:mean()
+    end
+    print("Validation set perplexity : " .. g_f3(torch.exp(perp / len)))
+    disable_dropout = false
 end
 
 local function run_test()
-  reset_state(state_test)
-  reset_noise()
-  local perp = 0
-  local len = state_test.data:size(1)
-  g_replace_table(model.s[0], model.start_s)
-  for i = 1, (len - 1) do
-    local x = state_test.data[i]
-    local y = state_test.data[i + 1]
-    perp_tmp, model.s[1] = unpack(model.rnns[1]:forward(
-      {x, y, model.s[0], model.noise_xe[1], model.noise_i, model.noise_h, model.noise_o}))
-    perp = perp + perp_tmp[1]
-    g_replace_table(model.s[0], model.s[1])
-  end
-  print("Test set perplexity : " .. g_f3(torch.exp(perp / (len - 1))))
+    reset_state(state_test)
+    reset_noise()   -- this is the same as disable dropout
+    local perp = 0
+    local len = state_test.data:size(1)
+    g_replace_table(model.s[0], model.start_s)
+    for i = 1, (len - 1) do
+        local x = state_test.data[i]
+        local y = state_test.data[i + 1]
+        perp_tmp, model.s[1] = unpack(model.rnns[1]:forward(
+          {x, y, model.s[0], model.noise_xe[1], model.noise_i, model.noise_h, model.noise_o}))
+        perp = perp + perp_tmp[1]
+        g_replace_table(model.s[0], model.s[1])
+    end
+    print("Test set perplexity : " .. g_f3(torch.exp(perp / (len - 1))))
 end
 
 local function main()
-  g_init_gpu(1)
-  state_train = {data=transfer_data(ptb.traindataset(params.batch_size))}
-  state_valid =  {data=transfer_data(ptb.validdataset(params.batch_size))}
-  state_test =  {data=transfer_data(ptb.testdataset(params.batch_size))}
-  print("Network parameters:")
-  print(params)
-  local states = {state_train, state_valid, state_test}
-  for _, state in pairs(states) do
-    reset_state(state)
-  end
-  setup()
-  local step = 0
-  local epoch = 0
-  local total_cases = 0
-  local beginning_time = torch.tic()
-  local start_time = torch.tic()
-  print("Starting training.")
-  local epoch_size = torch.floor(state_train.data:size(1) / params.seq_length)
-  local perps
-  while epoch < params.max_max_epoch do
-    local perp = fp(state_train):mean()
-    if perps == nil then
-      perps = torch.zeros(epoch_size):add(perp)
+    g_init_gpu(1)
+    state_train = {data=transfer_data(ptb.traindataset(params.batch_size))}
+    state_valid =  {data=transfer_data(ptb.validdataset(params.batch_size))}
+    state_test =  {data=transfer_data(ptb.testdataset(params.batch_size))}
+    print("Network parameters:")
+    print(params)
+    local states = {state_train, state_valid, state_test}
+    for _, state in pairs(states) do
+        reset_state(state)
     end
-    perps[step % epoch_size + 1] = perp
-    step = step + 1
-    bp(state_train)
-    total_cases = total_cases + params.seq_length * params.batch_size
-    epoch = step / epoch_size
-    if step % torch.round(epoch_size / 10) == 10 then
-      local wps = torch.floor(total_cases / torch.toc(start_time))
-      local since_beginning = g_d(torch.toc(beginning_time) / 60)
-      print('epoch = ' .. g_f3(epoch) ..
-            ', train perp. = ' .. g_f3(torch.exp(perps:mean())) ..
-            ', wps = ' .. wps ..
-            ', dw:norm() = ' .. g_f3(model.norm_dw) ..
-            ', lr = ' ..  g_f3(params.lr) ..
-            ', since beginning = ' .. since_beginning .. ' mins.')
+    setup()
+    local step = 0
+    local epoch = 0
+    local total_cases = 0
+    local beginning_time = torch.tic()
+    local start_time = torch.tic()
+    print("Starting training.")
+    local epoch_size = torch.floor(state_train.data:size(1) / params.seq_length)
+    local perps
+    while epoch < params.max_max_epoch do
+        local perp = fp(state_train):mean()
+        if perps == nil then
+            perps = torch.zeros(epoch_size):add(perp)
+        end
+        perps[step % epoch_size + 1] = perp
+        step = step + 1
+        bp(state_train)
+        total_cases = total_cases + params.seq_length * params.batch_size
+        epoch = step / epoch_size
+        if step % torch.round(epoch_size / 10) == 10 then
+            local wps = torch.floor(total_cases / torch.toc(start_time))
+            local since_beginning = g_d(torch.toc(beginning_time) / 60)
+            print('epoch = ' .. g_f3(epoch) ..
+                    ', train perp. = ' .. g_f3(torch.exp(perps:mean())) ..
+                    ', wps = ' .. wps ..
+                    ', dw:norm() = ' .. g_f3(model.norm_dw) ..
+                    ', lr = ' ..  g_f3(params.lr) ..
+                    ', since beginning = ' .. since_beginning .. ' mins.')
+        end
+        if step % epoch_size == 0 then
+            run_valid()
+            run_test()
+            if epoch > params.max_epoch then
+                params.lr = params.lr / params.decay
+            end
+        end
+        if step % 33 == 0 then
+          cutorch.synchronize()
+          collectgarbage()
+        end
     end
-    if step % epoch_size == 0 then
-      run_valid()
-      run_test()
-      if epoch > params.max_epoch then
-          params.lr = params.lr / params.decay
-      end
-    end
-    if step % 33 == 0 then
-      cutorch.synchronize()
-      collectgarbage()
-    end
-  end
-  run_test()
-  print("Training is over.")
+    run_test()
+    print("Training is over.")
 end
 
 main()
