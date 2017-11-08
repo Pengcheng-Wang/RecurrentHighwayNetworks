@@ -160,80 +160,80 @@ local function setup()
     model.s = {}
     model.ds = {}
     model.start_s = {}
-    for j = 0, params.seq_length do -- todo:pwang8. Time to read this
+    for j = 0, params.seq_length do
         model.s[j] = {}
         for d = 1, 2 * params.layers do
             model.s[j][d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
         end
     end
-  for d = 1, 2 * params.layers do
-    model.start_s[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
-    model.ds[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
-  end
+    for d = 1, 2 * params.layers do
+        model.start_s[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
+        model.ds[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
+    end
 
-  model.noise_i = {}
-  model.noise_x = {}
-  model.noise_xe = {}
-  for j = 1, params.seq_length do
-    model.noise_x[j] = transfer_data(torch.zeros(params.batch_size, 1))
-    model.noise_xe[j] = torch.expand(model.noise_x[j], params.batch_size, params.rnn_size)
-    model.noise_xe[j] = transfer_data(model.noise_xe[j])
-  end
-  model.noise_h = {}
-  for d = 1, params.layers do
-    model.noise_i[d] = transfer_data(torch.zeros(params.batch_size, 2 * params.rnn_size))
-    model.noise_h[d] = transfer_data(torch.zeros(params.batch_size, 2 * params.rnn_size))
-  end
-  model.noise_o = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
-  model.core_network = core_network
-  model.rnns = g_cloneManyTimes(core_network, params.seq_length)
-  model.norm_dw = 0
-  model.err = transfer_data(torch.zeros(params.seq_length))
+    model.noise_i = {}
+    model.noise_x = {}
+    model.noise_xe = {}
+    for j = 1, params.seq_length do
+        model.noise_x[j] = transfer_data(torch.zeros(params.batch_size, 1))
+        model.noise_xe[j] = torch.expand(model.noise_x[j], params.batch_size, params.rnn_size)
+        model.noise_xe[j] = transfer_data(model.noise_xe[j])
+    end
+    model.noise_h = {}
+    for d = 1, params.layers do
+        model.noise_i[d] = transfer_data(torch.zeros(params.batch_size, 2 * params.rnn_size))
+        model.noise_h[d] = transfer_data(torch.zeros(params.batch_size, 2 * params.rnn_size))
+    end
+    model.noise_o = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
+    model.core_network = core_network
+    model.rnns = g_cloneManyTimes(core_network, params.seq_length)
+    model.norm_dw = 0
+    model.err = transfer_data(torch.zeros(params.seq_length))
 
-  model.pred = {}
-  for j = 1, params.seq_length do
-    model.pred[j] = transfer_data(torch.zeros(params.batch_size, params.vocab_size))
-  end
-  local y                = nn.Identity()()
-  local pred             = nn.Identity()()
-  local err              = nn.ClassNLLCriterion()({pred, y})
-  model.test             = transfer_data(nn.gModule({y, pred}, {err}))
+    model.pred = {}
+    for j = 1, params.seq_length do
+        model.pred[j] = transfer_data(torch.zeros(params.batch_size, params.vocab_size))
+    end
+    local y                = nn.Identity()()
+    local pred             = nn.Identity()()
+    local err              = nn.ClassNLLCriterion()({pred, y})
+    model.test             = transfer_data(nn.gModule({y, pred}, {err}))
 end
 
 local function reset_state(state)
-  state.pos = 1
-  if model ~= nil and model.start_s ~= nil then
-    for d = 1, 2 * params.layers do
-      model.start_s[d]:zero()
+    state.pos = 1
+    if model ~= nil and model.start_s ~= nil then
+        for d = 1, 2 * params.layers do
+            model.start_s[d]:zero()
+        end
     end
-  end
 end
 
 local function reset_ds()
-  for d = 1, #model.ds do
-    model.ds[d]:zero()
-  end
+    for d = 1, #model.ds do
+        model.ds[d]:zero()
+    end
 end
 
 -- convenience functions to handle noise
 local function sample_noise(state)
-  for i = 1, params.seq_length do
-    model.noise_x[i]:bernoulli(1 - params.dropout_x)
-    model.noise_x[i]:div(1 - params.dropout_x)
-  end
- 
-  for b = 1, params.batch_size do
     for i = 1, params.seq_length do
-      local x = state.data[state.pos + i - 1]
-      for j = i+1, params.seq_length do
-        if state.data[state.pos + j - 1] == x then
-          model.noise_x[j][b] = model.noise_x[i][b]
-          -- we only need to override the first time; afterwards subsequent are copied:
-          break
-        end
-      end
+        model.noise_x[i]:bernoulli(1 - params.dropout_x)
+        model.noise_x[i]:div(1 - params.dropout_x)
     end
-  end
+    -- todo:pwang8. Time to read this.
+    for b = 1, params.batch_size do
+        for i = 1, params.seq_length do
+            local x = state.data[state.pos + i - 1]
+            for j = i+1, params.seq_length do
+                if state.data[state.pos + j - 1] == x then
+                    model.noise_x[j][b] = model.noise_x[i][b]
+                    -- we only need to override the first time; afterwards subsequent are copied:
+                    break
+                end
+            end
+        end
+    end
   for d = 1, params.layers do
     model.noise_i[d]:bernoulli(1 - params.dropout_i)
     model.noise_i[d]:div(1 - params.dropout_i)
