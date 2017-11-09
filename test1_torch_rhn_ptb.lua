@@ -118,34 +118,34 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
 end
 
 local function create_network()
-    local x                = nn.Identity()()
-    local y                = nn.Identity()()
-    local prev_s           = nn.Identity()()
-    local noise_x          = nn.Identity()()
-    local noise_i          = nn.Identity()()
+    local x                = nn.Identity()()    -- input of rhn_network
+    local y                = nn.Identity()()    -- output of rhn_network
+    local prev_s           = nn.Identity()()    -- previous hidden state s from each rhn (vertical) layer. the prev_s contains two parts. One is the c-gate value, the other is the hidden s_state
+    local noise_x          = nn.Identity()()    -- the following 4 are dropout masks. This is input dropout mask
+    local noise_i          = nn.Identity()()    --
     local noise_h          = nn.Identity()()
-    local noise_o          = nn.Identity()()
+    local noise_o          = nn.Identity()()    -- dropout mask for the output of rhn (it's the state_s of the highest layer in rhn_network)
     local i                = {[0] = LookupTable(params.vocab_size,
     params.rnn_size)(x)}    -- this lookup table is specifically designed for language model
     i[0] = local_Dropout(i[0], noise_x)
     local next_s           = {}
-    local split            = {prev_s:split(2 * params.layers)}  -- the split function: https://github.com/torch/torch7/blob/master/doc/tensor.md#result-splitresult-tensor-size-dim
-    local noise_i_split    = {noise_i:split(params.layers)} -- here the split() does split the tensor into tensors with size of params.layers along the 1st dim (in default)
-    local noise_h_split    = {noise_h:split(params.layers)}
-    for layer_idx = 1, params.layers do
-        local prev_c         = split[2 * layer_idx - 1]
-        local prev_h         = split[2 * layer_idx]
-        local n_i            = noise_i_split[layer_idx]     -- n_i and n_h are the dropout mask
-        local n_h            = noise_h_split[layer_idx]
+    local split            = {prev_s:split(2 * params.layers)}  -- the split function is the split() for nngraph.Node. Can be found here: https://github.com/torch/nngraph/blob/master/node.lua (This is not the split function for tensor)
+    local noise_i_split    = {noise_i:split(params.layers)} -- this nngraph.Node.split() function returns noutput number of new nodes that each take a single component of the output of this
+    local noise_h_split    = {noise_h:split(params.layers)} -- node in the order they are returned.
+    for layer_idx = 1, params.layers do     -- this params.layers is the vertical layer number of rhn, not the recurrent depth.
+        local prev_c         = split[2 * layer_idx - 1]     -- the prev_c is the c_gate value from previous time step (I don't think it is actually used in rhn)
+        local prev_h         = split[2 * layer_idx]         -- the prev_h is the hidden state_s value from previous time step. Here it does not concern recurrent depth, which is sth studied inside rhn
+        local n_i            = noise_i_split[layer_idx]     -- n_i and n_h are the dropout mask. n_i is the dropout mask for each (vertical) rhn layer's (vertical) input
+        local n_h            = noise_h_split[layer_idx]     -- n_h is the dropout mask for each (horizontal) rhn unit. I'm not sure if dropout is adopted inside one time step of rnn (in recurrence_depth)
         local next_c, next_h = rhn(i[layer_idx - 1], prev_c, prev_h, n_i, n_h)
         table.insert(next_s, next_c)
         table.insert(next_s, next_h)
-        i[layer_idx] = next_h
+        i[layer_idx] = next_h   -- this next_h is the state_s value, which is the output of rhn module
     end
+    local dropped          = local_Dropout(i[params.layers], noise_o)   -- the output of rhn module, after dropout
     local h2y              = nn.Linear(params.rnn_size, params.vocab_size)
-    local dropped          = local_Dropout(i[params.layers], noise_o)
-    local pred             = nn.LogSoftMax()(h2y(dropped))
-    local err              = nn.ClassNLLCriterion()({pred, y})
+    local pred             = nn.LogSoftMax()(h2y(dropped))  -- change the dimension from rnn_size to vocab_size and add LogSoftMax
+    local err              = nn.ClassNLLCriterion()({pred, y})  -- the structure of this nn is a little different. It has labels (y) also as input, and the output of the whole nn is a table {error, next_hidden_s}
     local module           = nn.gModule({x, y, prev_s, noise_x, noise_i, noise_h, noise_o},
     {err, nn.Identity()(next_s)})
     module:getParameters():uniform(-params.init_weight, params.init_weight)
