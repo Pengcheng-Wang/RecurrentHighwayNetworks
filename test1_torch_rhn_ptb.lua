@@ -87,7 +87,7 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
                 -- Use select table to fetch each gate
                 local dropped_x         = local_Dropout(x, nn.SelectTable(i)(sliced_noise_i)) -- slidced_noise_i is a table of tensors. So there are 2 gates and corresponding noise mask
                 dropped_h_tab[layer_i]  = local_Dropout(prev_h, nn.SelectTable(i)(sliced_noise_h))  -- the 2 gates contain one gate for calc hidden state, and the other gate being the transform gate
-                i2h[i]                  = nn.Linear(params.rnn_size, params.rnn_size)(dropped_x)
+                i2h[i]                  = nn.Linear(params.rnn_size, params.rnn_size)(dropped_x)    -- there are two i2h and h2h_tab bcz in equation 7 and 8 x and hidden state_h are utilized twice (2 sets of matrix multiplication)
                 h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i])
             end
             t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(nn.CAddTable()({i2h[1], h2h_tab[layer_i][1]}))) -- this is the tranform module in equation 8 in the paper. I guess the AddConstant is an init step
@@ -103,13 +103,13 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
                 dropped_h_tab[layer_i]  = local_Dropout(s_tab[layer_i-1], nn.SelectTable(i)(sliced_noise_h))
                 h2h_tab[layer_i][i]     = nn.Linear(params.rnn_size, params.rnn_size)(dropped_h_tab[layer_i]) -- h2h_tab[layer_i][1] is the multiplication in equation 8, h2h_tab[layer_i][2] is multiplication in equation 7
             end
-            t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(h2h_tab[layer_i][1]))
-            in_transform_tab[layer_i] = nn.Tanh()(h2h_tab[layer_i][2])
-            c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i]))
+            t_gate_tab[layer_i]       = nn.Sigmoid()(nn.AddConstant(params.initial_bias, False)(h2h_tab[layer_i][1]))   -- Attention: refer to the Deep Transition RNN figure in readme file to check the structure here    -- Equation 8
+            in_transform_tab[layer_i] = nn.Tanh()(h2h_tab[layer_i][2])  -- for transition layers inside one time step, only the h2h state values (horizontal) are propagated. So, it's a little different from the first transition layer   -- Equation 7
+            c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i]))     -- Equation 9, with the simplified assumption that c = 1 - t
             s_tab[layer_i]           = nn.CAddTable()({
                 nn.CMulTable()({c_gate_tab[layer_i], s_tab[layer_i-1]}),
                 nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
-            })
+            })  -- Equation 6
         end
     end
     local next_h = s_tab[params.recurrence_depth]
@@ -121,14 +121,14 @@ local function create_network()
     local x                = nn.Identity()()    -- input of rhn_network
     local y                = nn.Identity()()    -- output of rhn_network
     local prev_s           = nn.Identity()()    -- previous hidden state s from each rhn (vertical) layer. the prev_s contains two parts. One is the c-gate value, the other is the hidden s_state
-    local noise_x          = nn.Identity()()    -- the following 4 are dropout masks. This is input dropout mask
-    local noise_i          = nn.Identity()()    --
-    local noise_h          = nn.Identity()()
+    local noise_x          = nn.Identity()()    -- the following 4 are dropout masks. This is the dropout mask for (after) the input layer into the rhn module
+    local noise_i          = nn.Identity()()    -- the dropout mask (before) entering the hidden layer. It doubles the size of rnn_size, bcz we use this input twice to calculate hidden state_s in rhn module and the t_gate. I don't quite understand if it's necessary to have both noise_i mask and noise_x mask
+    local noise_h          = nn.Identity()()    -- the dropout mask for (before) the hidden layer. It doubles the size of rnn_size, bcz we use this hidden state_h twice to calculate hidden state_s in rhn module and the t_gate.
     local noise_o          = nn.Identity()()    -- dropout mask for the output of rhn (it's the state_s of the highest layer in rhn_network)
     local i                = {[0] = LookupTable(params.vocab_size,
-    params.rnn_size)(x)}    -- this lookup table is specifically designed for language model
+                                params.rnn_size)(x)}    -- this lookup table is specifically designed for language model
     i[0] = local_Dropout(i[0], noise_x)
-    local next_s           = {}
+    local next_s           = {} -- the stored state_s contains two parts for each hidden layer. 1st part is the c_gate value, the 2nd part is the hidden state_s value from rhn
     local split            = {prev_s:split(2 * params.layers)}  -- the split function is the split() for nngraph.Node. Can be found here: https://github.com/torch/nngraph/blob/master/node.lua (This is not the split function for tensor)
     local noise_i_split    = {noise_i:split(params.layers)} -- this nngraph.Node.split() function returns noutput number of new nodes that each take a single component of the output of this
     local noise_h_split    = {noise_h:split(params.layers)} -- node in the order they are returned.
@@ -147,7 +147,7 @@ local function create_network()
     local pred             = nn.LogSoftMax()(h2y(dropped))  -- change the dimension from rnn_size to vocab_size and add LogSoftMax
     local err              = nn.ClassNLLCriterion()({pred, y})  -- the structure of this nn is a little different. It has labels (y) also as input, and the output of the whole nn is a table {error, next_hidden_s}
     local module           = nn.gModule({x, y, prev_s, noise_x, noise_i, noise_h, noise_o},
-    {err, nn.Identity()(next_s)})
+                                        {err, nn.Identity()(next_s)})
     module:getParameters():uniform(-params.init_weight, params.init_weight)
     return transfer_data(module)
 end
