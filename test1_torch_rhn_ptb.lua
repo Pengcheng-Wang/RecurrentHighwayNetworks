@@ -119,7 +119,7 @@ end
 
 local function create_network()
     local x                = nn.Identity()()    -- input of rhn_network
-    local y                = nn.Identity()()    -- output of rhn_network
+    local y                = nn.Identity()()    -- output of rhn_network, may not be the output of this whole NN created from this function
     local prev_s           = nn.Identity()()    -- previous hidden state s from each rhn (vertical) layer. the prev_s contains two parts. One is the c-gate value, the other is the hidden s_state
     local noise_x          = nn.Identity()()    -- the following 4 are dropout masks. This is the dropout mask for (after) the input layer into the rhn module
     local noise_i          = nn.Identity()()    -- the dropout mask (before) entering the hidden layer. It doubles the size of rnn_size, bcz we use this input twice to calculate hidden state_s in rhn module and the t_gate. I don't quite understand if it's necessary to have both noise_i mask and noise_x mask
