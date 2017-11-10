@@ -156,8 +156,8 @@ local function setup()
     print("Creating an RHN network.")
     local core_network = create_network()
     paramx, paramdx = core_network:getParameters()
-    model.s = {}
-    model.ds = {}   -- I guess this is derivatives over hidden states (s)
+    model.s = {}    -- So this s table records all state_s values for all time step
+    model.ds = {}   -- I guess this is derivatives over hidden states (s).
     model.start_s = {}
     for j = 0, params.seq_length do
         model.s[j] = {}
@@ -175,7 +175,7 @@ local function setup()
     model.noise_xe = {}
     for j = 1, params.seq_length do
         model.noise_x[j] = transfer_data(torch.zeros(params.batch_size, 1))
-        model.noise_xe[j] = torch.expand(model.noise_x[j], params.batch_size, params.rnn_size)
+        model.noise_xe[j] = torch.expand(model.noise_x[j], params.batch_size, params.rnn_size)  -- the expand() duplicate the original tensor, without allocating new memory
         model.noise_xe[j] = transfer_data(model.noise_xe[j])
     end
     model.noise_h = {}
@@ -220,7 +220,7 @@ local function sample_noise(state)
         model.noise_x[i]:bernoulli(1 - params.dropout_x)
         model.noise_x[i]:div(1 - params.dropout_x)
     end
-
+    -- The noise_x setting is a little confusing. I don't quite understand it. It looks like in the sequence they randomly turn off certain words in a word sequence
     for b = 1, params.batch_size do
         for i = 1, params.seq_length do
             local x = state.data[state.pos + i - 1]
@@ -283,8 +283,8 @@ local function bp(state)
         local s = model.s[i - 1]
         local derr = transfer_data(torch.ones(1))
         local tmp = model.rnns[i]:backward( -- Yarin: do we need model.noise_x[i+1]?
-        {x, y, s, model.noise_xe[i], model.noise_i, model.noise_h, model.noise_o},
-        {derr, model.ds})[3]
+                            {x, y, s, model.noise_xe[i], model.noise_i, model.noise_h, model.noise_o},
+                            {derr, model.ds})[3]
         g_replace_table(model.ds, tmp)
         cutorch.synchronize()
     end
@@ -329,7 +329,7 @@ local function run_test()
 end
 
 local function main()
-    g_init_gpu(1)
+    --g_init_gpu(1)
     state_train = {data=transfer_data(ptb.traindataset(params.batch_size))}
     state_valid =  {data=transfer_data(ptb.validdataset(params.batch_size))}
     state_test =  {data=transfer_data(ptb.testdataset(params.batch_size))}
@@ -347,7 +347,7 @@ local function main()
     local start_time = torch.tic()
     print("Starting training.")
     local epoch_size = torch.floor(state_train.data:size(1) / params.seq_length)
-    local perps
+    local perps -- todo:pwang8. Time to read this part.
     while epoch < params.max_max_epoch do
         local perp = fp(state_train):mean()
         if perps == nil then
