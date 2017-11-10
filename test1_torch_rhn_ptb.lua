@@ -321,7 +321,7 @@ local function run_test()
         local x = state_test.data[i]
         local y = state_test.data[i + 1]
         perp_tmp, model.s[1] = unpack(model.rnns[1]:forward(
-        {x, y, model.s[0], model.noise_xe[1], model.noise_i, model.noise_h, model.noise_o}))
+                                    {x, y, model.s[0], model.noise_xe[1], model.noise_i, model.noise_h, model.noise_o}))
         perp = perp + perp_tmp[1]
         g_replace_table(model.s[0], model.s[1])
     end
@@ -347,7 +347,7 @@ local function main()
     local start_time = torch.tic()
     print("Starting training.")
     local epoch_size = torch.floor(state_train.data:size(1) / params.seq_length)
-    local perps -- todo:pwang8. Time to read this part.
+    local perps
     while epoch < params.max_max_epoch do
         local perp = fp(state_train):mean()
         if perps == nil then
