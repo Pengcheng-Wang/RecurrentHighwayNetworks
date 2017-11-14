@@ -80,7 +80,7 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
     local in_transform_tab = {}
     local s_tab = {}
     for layer_i = 1, params.recurrence_depth do -- Attention: pwang8. The for loop iteration count is the recurrence_depth (horizontal, in each time step), not RHN layers
-        local i2h        = {}   -- i2h is a single item, bcz only one rhn unit is adopted to connect vertical layers
+        local i2h        = {}   -- i2h is a single item, bcz only one rhn unit is adopted to connect vertical layers (vertical input of x)
         h2h_tab[layer_i] = {}   -- h2h is of multiple items, bcz a large (10 in this example) recurrent depth is adopted (strictly it is not the (vertical) layers of NN, it is the horizontal depth defined in transition RNN in between one time step)
         if layer_i == 1 then
             for i = 1, 2 do
