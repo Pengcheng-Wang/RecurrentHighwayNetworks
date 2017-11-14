@@ -94,7 +94,7 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
             in_transform_tab[layer_i] = nn.Tanh()(nn.CAddTable()({i2h[2], h2h_tab[layer_i][2]}))  -- calculate the hidden module, depicted in equation 7 in the paper
             c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i])) -- in the implementation, the c gate is designed as (1-t), in which the t gate is calculated aboved
             s_tab[layer_i]           = nn.CAddTable()({
-                nn.CMulTable()({c_gate_tab[layer_i], prev_h}),
+                nn.CMulTable()({c_gate_tab[layer_i], prev_h}),      -- I doubt if this implementation is the same as described in equation 7, the prev_h is not added with input x
                 nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
             })  -- calc the output at time step t, as depicted in equation 6 in the paper
         else
