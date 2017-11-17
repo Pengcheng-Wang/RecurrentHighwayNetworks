@@ -94,7 +94,7 @@ local function rhn(x, prev_c, prev_h, noise_i, noise_h)
             in_transform_tab[layer_i] = nn.Tanh()(nn.CAddTable()({i2h[2], h2h_tab[layer_i][2]}))  -- calculate the hidden module, depicted in equation 7 in the paper
             c_gate_tab[layer_i]       = nn.AddConstant(1,false)(nn.MulConstant(-1, false)(t_gate_tab[layer_i])) -- in the implementation, the c gate is designed as (1-t), in which the t gate is calculated aboved
             s_tab[layer_i]           = nn.CAddTable()({
-                nn.CMulTable()({c_gate_tab[layer_i], prev_h}),      -- I doubt if this implementation is the same as described in equation 7, the prev_h is not added with input x
+                nn.CMulTable()({c_gate_tab[layer_i], prev_h}),      -- todo:pwang8. Nov 14, 2017. Here the calculation only uses prev_h, and input x is not included. So I'm wondering how it performs if we added input, or use residual connection
                 nn.CMulTable()({t_gate_tab[layer_i], in_transform_tab[layer_i]})
             })  -- calc the output at time step t, as depicted in equation 6 in the paper
         else
@@ -170,7 +170,6 @@ local function setup()
         model.ds[d] = transfer_data(torch.zeros(params.batch_size, params.rnn_size))
     end
 
-    model.noise_i = {}
     model.noise_x = {}
     model.noise_xe = {}
     for j = 1, params.seq_length do
@@ -178,6 +177,7 @@ local function setup()
         model.noise_xe[j] = torch.expand(model.noise_x[j], params.batch_size, params.rnn_size)  -- the expand() duplicate the original tensor, without allocating new memory
         model.noise_xe[j] = transfer_data(model.noise_xe[j])
     end
+    model.noise_i = {}
     model.noise_h = {}
     for d = 1, params.layers do
         model.noise_i[d] = transfer_data(torch.zeros(params.batch_size, 2 * params.rnn_size))
